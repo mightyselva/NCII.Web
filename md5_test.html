@@ -1,0 +1,75 @@
+<html>
+ <head>
+ 
+	<script src="./scripts/jquery/jquery.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/hash-wasm"></script>
+	<script type="text/javascript">
+	    const chunkSize = 64 * 1024 * 1024;
+		const fileReader = new FileReader();
+		let hasher = null;
+
+		function hashChunk(chunk) {
+		  return new Promise((resolve, reject) => {
+			fileReader.onload = async(e) => {
+			  const view = new Uint8Array(e.target.result);
+			  hasher.update(view);
+			  resolve();
+			};
+
+			fileReader.readAsArrayBuffer(chunk);
+		  });
+		}
+
+		const readFile = async(file) => {
+		  if (hasher) {
+			hasher.init();
+		  } else {
+			hasher = await hashwasm.createMD5();
+		  }
+
+		  const chunkNumber = Math.floor(file.size / chunkSize);
+
+		  for (let i = 0; i <= chunkNumber; i++) {
+			const chunk = file.slice(
+			  chunkSize * i,
+			  Math.min(chunkSize * (i + 1), file.size)
+			);
+			await hashChunk(chunk);
+		  }
+
+		  const hash = hasher.digest();
+		  return Promise.resolve(hash);
+		};
+
+		$(document).ready(function () {
+						
+			$("#file-input").change(async(event) => {
+				const file = event.target.files[0];
+
+				$("#result").html("Loading...");
+				const start = Date.now();
+				const hash = await readFile(file);
+				const end = Date.now();
+				const duration = end - start;
+				const fileSizeMB = file.size / 1024 / 1024;
+				const throughput = fileSizeMB / (duration / 1000);
+				
+				$("#result").html(`
+					Hash: ${hash}<br>
+					Duration: ${duration} ms<br>
+					Throughput: ${throughput.toFixed(2)} MB/s
+				  `);
+			});
+			
+
+		});
+		
+		
+	</script>
+</head>
+<body>
+    <input type="file" id="file-input" accept="video/*"> <br/>
+	<div id="result"></div>
+</body>
+
+</html>

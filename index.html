@@ -1,0 +1,141 @@
+<html>
+
+<head>
+	<meta charset='UTF-8'>
+	<title>NCII</title>
+	<link rel="stylesheet" href="./styles/style.css">
+	<script src="./scripts/jquery/jquery.min.js"></script>
+	<script src="./scripts/pdq-photo-hasher.js"></script>
+	<script type='text/javascript'>
+		let DoMagickCall = "";
+
+		$(document).ready(function () {
+
+			$('#uploadFiles').click(function () {
+				$('#uploadFiles').addClass('upload--loading');
+				$('.upload-hidden').click();
+			});
+
+			$("#myfile").change(function () {
+				let files = document.getElementById('myfile').files;
+
+				$('#uploadFiles').removeClass('upload--loading');
+				$('body').addClass('file-process-open');
+
+				// Loop through the selected files files.
+				$.each(files, function (key, value) {
+					let fname = '';
+					let tempfname = '';
+					let reader = new FileReader();
+
+					let file = value;
+					if (file) {
+						fname = file.name;
+						if (fname) {
+							tempfname = `${fname.substr(0, fname.lastIndexOf("."))}_temp.pnm`;
+						}
+					}
+
+					reader.onloadend = function (e) {
+
+						let result = reader.result;
+						const data = new Uint8Array(result);
+
+						// Save the selected files to emscripten file system for c++ code to access the file.
+						let stream = FS.open(fname, 'w+');
+						FS.write(stream, data, 0, data.length, 0);
+						FS.close(stream);
+
+						// Call the function for converting the image to .pnm file using image magick web assembly.
+						DoMagickCall(fname, tempfname,formatFileSize(file.size,2));
+					}
+
+					reader.readAsArrayBuffer(file);
+				});
+			});
+		});
+		/**
+		  Method for getting the file size.
+		**/
+		function formatFileSize(bytes,decimalPoint) {
+			   if(bytes == 0) return '0 Bytes';
+			   var k = 1024,
+				   dm = decimalPoint || 2,
+				   sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'],
+				   i = Math.floor(Math.log(bytes) / Math.log(k));
+			   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+		}
+	</script>
+
+	<script type='module'>
+		//import the library to talk to imagemagick
+		import * as Magick from './scripts/image-magick/magickApi.js';
+
+		// Fetch the image to rotate, and call image magick
+		DoMagickCall = async function (filename, tempfilename,filesize) {
+
+			// Read the file whose hash needs to be calculated.     
+			let sourceBytes = FS.readFile(filename);
+
+			// Call image magick with one source image, and command to convert the file to .pnm file required for hash calculation.
+			const files = [{ 'name': filename, 'content': sourceBytes }];
+			const command = ["convert", filename, "-density", "400x400", tempfilename];
+
+			let processedFiles = await Magick.Call(files, command);
+
+			// response can be multiple files (example split)
+			// here we know we just have one
+			let firstOutputImage = processedFiles[0];
+
+			const data = new Uint8Array(await firstOutputImage['blob'].arrayBuffer());
+
+			let stream = FS.open(tempfilename, 'w+');
+			FS.write(stream, data, 0, data.length, 0);
+			FS.close(stream);
+
+			var result = Module.ccall(
+				'getHash',	// name of C function
+				'string',	// return type
+				['string'],	// argument types
+				[filename]	// arguments
+			);
+
+			// Remove the file so that we can free some memory.
+			FS.unlink(filename);
+			$("#resHeader").show();
+			$("#result").append(`<tr><td>${filename}</td><td>${result}</td><td>${filesize}</td></tr>`);
+
+		};
+	</script>
+</head>
+
+<body>
+
+	<div class="body-container-wrapper">
+		<div class="page-center">
+			<h1>Upload Your files here</h1>
+
+			<a class="upload" id="uploadFiles"><span>Select files</span></a>
+
+			<form id="upload" enctype="multipart/form-data">
+				<div id="drop">
+					<input type="file" name="img" id="myfile" multiple class="upload-hidden" accept="image/*"/>
+				</div>
+			</form>
+
+			<table id="result">
+				<thead id="resHeader" style="display:none">
+					<tr>
+						<th style="width: 40%;">Uploaded File</th>
+						<th style="width: 50%;">Hash</th>
+						<th style="width: 10%;">File Size</th>
+					</tr>
+				</thead>
+				<tbody></tbody>
+			</table>
+		</div>
+	</div>
+
+</body>
+
+</html>
